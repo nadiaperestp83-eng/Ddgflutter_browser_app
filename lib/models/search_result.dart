@@ -21,7 +21,7 @@ class SearchResult {
         content: j['content'] ?? '',
         engine: j['engine'] ?? '',
         publishedDate: j['publishedDate'],
-        thumbnail: j['thumbnail']?.toString().isNotEmpty == true
+        thumbnail: (j['thumbnail'] ?? '').toString().isNotEmpty
             ? j['thumbnail']
             : null,
       );
@@ -41,7 +41,7 @@ class SearchResponse {
   factory SearchResponse.fromJson(Map<String, dynamic> j) => SearchResponse(
         query: j['query'] ?? '',
         results: (j['results'] as List? ?? [])
-            .map((r) => SearchResult.fromJson(r))
+            .map((r) => SearchResult.fromJson(r as Map<String, dynamic>))
             .toList(),
         suggestions: (j['suggestions'] as List? ?? [])
             .map((s) => s.toString())
