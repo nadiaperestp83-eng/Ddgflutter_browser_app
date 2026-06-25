@@ -29,12 +29,13 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
   bool _webLoading = false;
   int _blockedCount = 0;
   bool _currentIsHttps = false;
-
-  // URL completa "real" da aba atual (usada só quando o usuário edita)
   String _currentUrl = '';
 
   SearchResponse? _searchResponse;
   String? _errorMsg;
+
+  // Cor única para barra E fundo
+  static const Color _bg = Color(0xFF1A1A2E);
 
   final InAppWebViewSettings _webSettings = InAppWebViewSettings(
     useShouldOverrideUrlLoading: true,
@@ -63,20 +64,14 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
     _searchFocus.addListener(() {
       final hasFocus = _searchFocus.hasFocus;
       setState(() => _isEditing = hasFocus);
-
-      // Só afeta a exibição quando estamos numa página (webview).
-      // Em home/results o texto é a busca digitada — não tocamos nele aqui.
       if (_screen == _Screen.webview) {
         if (hasFocus) {
-          // Editando: mostra URL completa, selecionada, pronta pra
-          // sobrescrever (digitar busca) ou editar.
           _searchController.text = _currentUrl;
           _searchController.selection = TextSelection(
             baseOffset: 0,
             extentOffset: _searchController.text.length,
           );
         } else {
-          // Fora de edição: mostra só o domínio, estilo DDG.
           _searchController.text = _domainOnly(_currentUrl);
         }
       }
@@ -90,7 +85,6 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
     super.dispose();
   }
 
-  // ── Extrai só o domínio (sem www.) pra exibição estilo DDG ────
   String _domainOnly(String url) {
     if (url.isEmpty) return '';
     try {
@@ -106,10 +100,8 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
     final t = input.trim();
     if (t.isEmpty) return;
     _searchFocus.unfocus();
-
     if (SearxNGConfig.looksLikeUrl(t)) {
-      final url = SearxNGConfig.toUrl(t);
-      _loadInWebView(url);
+      _loadInWebView(SearxNGConfig.toUrl(t));
     } else {
       _doSearch(t);
     }
@@ -123,10 +115,7 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
       _currentIsHttps = url.startsWith('https://');
       _currentUrl = url;
     });
-    if (_webController != null) {
-      _webController!.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
-    }
-    // Acabou de navegar, não está editando -> mostra só o domínio.
+    _webController?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
     _searchController.text = _domainOnly(url);
   }
 
@@ -191,33 +180,61 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
     }
   }
 
-  // ── Botão "fogo": limpa dados de navegação (estilo DDG) ──────
-  // OBS: limpeza completa + histórico ficam pra próxima etapa.
-  Future<void> _clearBrowsingData() async {
+  // ── Botão fogo: limpa tudo como o DDG ───────────────────────
+  Future<void> _burnAll() async {
+    // 1. Cookies
+    await CookieManager.instance().deleteAllCookies();
+
+    // 2. Cache + histórico do WebView
     await _webController?.clearCache();
-    if (_webController != null) {
-      await _webController!
-          .loadUrl(urlRequest: URLRequest(url: WebUri('about:blank')));
-    }
-    setState(() {
-      _screen = _Screen.home;
-      _searchController.clear();
-      _blockedCount = 0;
-      _currentIsHttps = false;
-      _currentUrl = '';
-      _searchResponse = null;
-    });
+    await _webController?.clearHistory();
+
+    // 3. DOM Storage / localStorage / IndexedDB via JS
+    await _webController?.evaluateJavascript(source: '''
+      try { localStorage.clear(); } catch(e) {}
+      try { sessionStorage.clear(); } catch(e) {}
+      try {
+        indexedDB.databases().then(function(dbs) {
+          dbs.forEach(function(db) { indexedDB.deleteDatabase(db.name); });
+        });
+      } catch(e) {}
+    ''');
+
+    // 4. Carrega blank e reseta estado
+    await _webController?.loadUrl(
+      urlRequest: URLRequest(url: WebUri('about:blank')),
+    );
+
     if (mounted) {
+      setState(() {
+        _screen = _Screen.home;
+        _searchController.clear();
+        _searchResponse = null;
+        _errorMsg = null;
+        _blockedCount = 0;
+        _webProgress = 0;
+        _webLoading = false;
+        _currentIsHttps = false;
+        _currentUrl = '';
+      });
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Dados de navegação limpos'),
-          duration: Duration(seconds: 1),
+          content: Row(
+            children: [
+              Icon(Icons.local_fire_department,
+                  color: Color(0xFFE07A2A), size: 18),
+              SizedBox(width: 8),
+              Text('Dados de navegação apagados'),
+            ],
+          ),
+          duration: Duration(seconds: 2),
+          backgroundColor: Color(0xFF1A1A2E),
         ),
       );
     }
   }
 
-  // ── Contador de abas (visual por enquanto) ────────────────────
   void _onTabsTap() {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -230,9 +247,8 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
   @override
   Widget build(BuildContext context) {
     final accent = Color(SearxNGConfig.accentColor);
-    final barColor = Color(SearxNGConfig.primaryColor);
-
     const neutralIconColor = Color(0xFF5F5F5F);
+
     IconData leadingIcon;
     Color leadingIconColor;
     if (_isEditing || _screen != _Screen.webview) {
@@ -247,11 +263,18 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
     }
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark,
+      value: SystemUiOverlayStyle.light,
       child: Scaffold(
         key: _scaffoldKey,
-        backgroundColor: const Color(0xFF0D0D1A),
-        endDrawer: _SettingsDrawer(accent: accent, barColor: barColor),
+        backgroundColor: _bg, // mesma cor da barra
+        endDrawer: _SettingsDrawer(
+          accent: accent,
+          barColor: _bg,
+          onBurnTap: () {
+            Navigator.pop(context);
+            _burnAll();
+          },
+        ),
         body: SafeArea(
           child: Column(
             children: [
@@ -269,7 +292,7 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
                 onSubmit: _onSubmit,
                 onBack: _goBack,
                 onMenuTap: () => _scaffoldKey.currentState?.openEndDrawer(),
-                onFireTap: _clearBrowsingData,
+                onFireTap: _burnAll,
                 onTabsTap: _onTabsTap,
               ),
               Expanded(child: _buildBody(accent)),
@@ -289,6 +312,8 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
             initialUrlRequest: URLRequest(url: WebUri('about:blank')),
             initialSettings: _webSettings,
             onWebViewCreated: (c) => _webController = c,
+            onLoadStart: (c, url) =>
+                setState(() { _webLoading = true; _webProgress = 0; }),
             onLoadStop: (c, url) {
               final u = url?.toString() ?? '';
               if (u.isNotEmpty && u != 'about:blank') {
@@ -303,12 +328,6 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
                 });
               }
             },
-            onLoadStart: (c, url) {
-              setState(() {
-                _webLoading = true;
-                _webProgress = 0;
-              });
-            },
             onProgressChanged: (c, p) =>
                 setState(() => _webProgress = p / 100.0),
             shouldOverrideUrlLoading: (c, action) async {
@@ -321,7 +340,8 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
             },
           ),
         ),
-        if (_screen == _Screen.home) _HomeScreen(accent: accent),
+        if (_screen == _Screen.home)
+          _HomeScreen(accent: accent),
         if (_screen == _Screen.results)
           _isSearching
               ? Center(child: CircularProgressIndicator(color: accent))
@@ -343,7 +363,7 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
 }
 
 // ================================================================
-//  Barra fixa estilo DDG (clara, formato pílula)
+//  Barra fixa estilo DDG
 // ================================================================
 class _TopBar extends StatelessWidget {
   final TextEditingController controller;
@@ -438,9 +458,9 @@ class _TopBar extends StatelessWidget {
                           autocorrect: false,
                           style: const TextStyle(
                               color: Colors.black87, fontSize: 15),
-                          decoration: InputDecoration(
+                          decoration: const InputDecoration(
                             hintText: 'Pesquisar',
-                            hintStyle: const TextStyle(
+                            hintStyle: TextStyle(
                                 color: _hintColor, fontSize: 15),
                             border: InputBorder.none,
                             isDense: true,
@@ -470,13 +490,16 @@ class _TopBar extends StatelessWidget {
                   ),
                 ),
               ),
+              // Fogo
               IconButton(
                 onPressed: onFireTap,
                 icon: const Icon(Icons.local_fire_department,
                     color: Color(0xFFE07A2A), size: 22),
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                constraints:
+                    const BoxConstraints(minWidth: 36, minHeight: 36),
               ),
+              // Abas
               InkWell(
                 onTap: onTabsTap,
                 borderRadius: BorderRadius.circular(6),
@@ -489,20 +512,20 @@ class _TopBar extends StatelessWidget {
                     borderRadius: BorderRadius.circular(6),
                   ),
                   alignment: Alignment.center,
-                  child: const Text(
-                    '1',
-                    style: TextStyle(
-                        color: _iconDark,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600),
-                  ),
+                  child: const Text('1',
+                      style: TextStyle(
+                          color: _iconDark,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600)),
                 ),
               ),
+              // Menu
               IconButton(
                 onPressed: onMenuTap,
                 icon: const Icon(Icons.menu, color: _iconDark, size: 22),
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                constraints:
+                    const BoxConstraints(minWidth: 36, minHeight: 36),
               ),
             ],
           ),
@@ -521,7 +544,7 @@ class _TopBar extends StatelessWidget {
 }
 
 // ================================================================
-//  Tela inicial
+//  Tela inicial — fundo igual à barra
 // ================================================================
 class _HomeScreen extends StatelessWidget {
   final Color accent;
@@ -530,7 +553,7 @@ class _HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: const Color(0xFF0D0D1A),
+      color: const Color(0xFF1A1A2E), // mesma da barra
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -578,7 +601,7 @@ class _ResultsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: const Color(0xFF0D0D1A),
+      color: const Color(0xFF1A1A2E), // mesma da barra
       child: ListView.builder(
         padding: const EdgeInsets.only(top: 8, bottom: 24),
         itemCount: response.results.length +
@@ -649,7 +672,9 @@ class _ResultCard extends StatelessWidget {
             const SizedBox(height: 6),
             Text(result.title,
                 style: TextStyle(
-                    color: accent, fontSize: 15, fontWeight: FontWeight.w600)),
+                    color: accent,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600)),
             if (result.content.isNotEmpty) ...[
               const SizedBox(height: 5),
               Text(result.content,
@@ -663,7 +688,8 @@ class _ResultCard extends StatelessWidget {
             if (result.publishedDate != null) ...[
               const SizedBox(height: 5),
               Text(result.publishedDate!,
-                  style: const TextStyle(color: Colors.white24, fontSize: 11)),
+                  style: const TextStyle(
+                      color: Colors.white24, fontSize: 11)),
             ],
           ],
         ),
@@ -678,7 +704,9 @@ class _SuggestionsRow extends StatelessWidget {
   final ValueChanged<String> onTap;
 
   const _SuggestionsRow(
-      {required this.suggestions, required this.accent, required this.onTap});
+      {required this.suggestions,
+      required this.accent,
+      required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -700,11 +728,13 @@ class _SuggestionsRow extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
-                          border: Border.all(color: accent.withOpacity(0.3)),
+                          border: Border.all(
+                              color: accent.withOpacity(0.3)),
                           borderRadius: BorderRadius.circular(16),
                         ),
                         child: Text(s,
-                            style: TextStyle(color: accent, fontSize: 13)),
+                            style:
+                                TextStyle(color: accent, fontSize: 13)),
                       ),
                     ))
                 .toList(),
@@ -716,20 +746,27 @@ class _SuggestionsRow extends StatelessWidget {
 }
 
 // ================================================================
-//  Drawer configurações
+//  Drawer — com botão fogo
 // ================================================================
 class _SettingsDrawer extends StatelessWidget {
   final Color accent, barColor;
-  const _SettingsDrawer({required this.accent, required this.barColor});
+  final VoidCallback onBurnTap;
+
+  const _SettingsDrawer({
+    required this.accent,
+    required this.barColor,
+    required this.onBurnTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Drawer(
-      backgroundColor: const Color(0xFF0D0D1A),
+      backgroundColor: const Color(0xFF1A1A2E), // mesma da barra
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Cabeçalho
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(20),
@@ -747,6 +784,27 @@ class _SettingsDrawer extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
+
+            // Botão fogo — apaga tudo
+            ListTile(
+              leading: const Icon(Icons.local_fire_department,
+                  color: Color(0xFFE07A2A), size: 22),
+              title: const Text('Apagar dados de navegação',
+                  style: TextStyle(
+                      color: Color(0xFFE07A2A),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600)),
+              subtitle: const Text(
+                  'Cookies, cache, histórico e armazenamento',
+                  style: TextStyle(color: Colors.white38, fontSize: 12)),
+              trailing: const Icon(Icons.chevron_right,
+                  color: Colors.white24, size: 18),
+              onTap: onBurnTap,
+            ),
+
+            const Divider(color: Colors.white12, height: 1),
+            const SizedBox(height: 8),
+
             _item(Icons.tune, 'Configurações do navegador', accent,
                 () => Navigator.pop(context)),
             _item(Icons.search, 'Instância SearxNG', accent,
@@ -755,12 +813,14 @@ class _SettingsDrawer extends StatelessWidget {
                 () => Navigator.pop(context)),
             _item(Icons.info_outline, 'Sobre', accent,
                 () => Navigator.pop(context)),
+
             const Spacer(),
             Padding(
               padding: const EdgeInsets.all(16),
               child: Text(SearxNGConfig.baseUrl,
                   style: TextStyle(
-                      color: Colors.white.withOpacity(0.3), fontSize: 11)),
+                      color: Colors.white.withOpacity(0.3),
+                      fontSize: 11)),
             ),
           ],
         ),
@@ -768,12 +828,14 @@ class _SettingsDrawer extends StatelessWidget {
     );
   }
 
-  Widget _item(IconData icon, String label, Color accent, VoidCallback onTap) {
+  Widget _item(
+      IconData icon, String label, Color accent, VoidCallback onTap) {
     return ListTile(
       leading: Icon(icon, color: accent, size: 20),
       title: Text(label,
           style: const TextStyle(color: Colors.white70, fontSize: 15)),
-      trailing: const Icon(Icons.chevron_right, color: Colors.white24, size: 18),
+      trailing: const Icon(Icons.chevron_right,
+          color: Colors.white24, size: 18),
       onTap: onTap,
     );
   }
