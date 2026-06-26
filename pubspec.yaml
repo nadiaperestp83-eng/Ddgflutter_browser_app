@@ -39,6 +39,7 @@ dependencies:
   window_manager_plus: ^1.0.5
   path: any
   http: ^1.2.1
+  flutter_wireguard: ^1.0.0
 
 dev_dependencies:
   flutter_test:
