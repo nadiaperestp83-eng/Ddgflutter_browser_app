@@ -37,13 +37,11 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
   SearchResponse? _searchResponse;
   String? _errorMsg;
 
-  static const Color _pageBg     = Color(0xFFEEEEEE);
   static const Color _cardBg     = Color(0xFFFFFFFF);
   static const Color _cardBorder = Color(0xFFE0E0E0);
   static const Color _textMain   = Color(0xFF1A1A1A);
   static const Color _textSub    = Color(0xFF5F5F5F);
   static const Color _iconGray   = Color(0xFF5F5F5F);
-  static const Color _hintGray   = Color(0xFF8A8A8A);
   static const Color _accent     = Color(0xFF00D4FF);
 
   final InAppWebViewSettings _webSettings = InAppWebViewSettings(
@@ -70,6 +68,18 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
   @override
   void initState() {
     super.initState();
+
+    // Força edge-to-edge aqui também para garantir
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.dark,
+      statusBarBrightness: Brightness.light,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarDividerColor: Colors.transparent,
+      systemNavigationBarIconBrightness: Brightness.dark,
+    ));
+
     _searchFocus.addListener(() {
       final hasFocus = _searchFocus.hasFocus;
       setState(() => _isEditing = hasFocus);
@@ -244,7 +254,8 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
   @override
   Widget build(BuildContext context) {
     final vpn = context.watch<VpnService>();
-    final topPadding = MediaQuery.of(context).padding.top; // altura da status bar
+    // Usa viewPadding para pegar a altura real da status bar no modo edgeToEdge
+    final topPadding = MediaQuery.of(context).viewPadding.top;
 
     IconData leadingIcon;
     Color leadingIconColor;
@@ -259,29 +270,25 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
       leadingIconColor = _iconGray;
     }
 
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark.copyWith(
-        statusBarColor: Colors.transparent,
-        systemNavigationBarColor: Colors.transparent,
-        statusBarIconBrightness: Brightness.dark,
-        statusBarBrightness: Brightness.dark,
+    return Scaffold(
+      key: _scaffoldKey,
+      // Sem AppBar, sem backgroundColor — tudo controlado manualmente
+      backgroundColor: const Color(0xFFDFE9FF),
+      extendBody: true,
+      extendBodyBehindAppBar: true,
+      endDrawer: _SettingsDrawer(
+        accent: _accent,
+        vpn: vpn,
+        onBurnTap: () {
+          Navigator.pop(context);
+          _burnAll();
+        },
       ),
-      child: Scaffold(
-        key: _scaffoldKey,
-        backgroundColor: Colors.transparent,
-        extendBodyBehindAppBar: true,
-        endDrawer: _SettingsDrawer(
-          accent: _accent,
-          vpn: vpn,
-          onBurnTap: () {
-            Navigator.pop(context);
-            _burnAll();
-          },
-        ),
-        body: Stack(
-          children: [
-            // Gradiente ocupando toda a tela
-            Container(
+      body: Stack(
+        children: [
+          // Gradiente ocupando TODA a tela incluindo status bar
+          Positioned.fill(
+            child: Container(
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
@@ -294,59 +301,53 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
                 ),
               ),
             ),
+          ),
 
-            // Blobs
-            Positioned(
-              top: -80, left: -60,
-              child: _Blob(size: 280, color: const Color(0xFFB39DDB)),
-            ),
-            Positioned(
-              top: 200, right: -60,
-              child: _Blob(size: 220, color: const Color(0xFF80DEEA)),
-            ),
-            Positioned(
-              bottom: 200, left: -40,
-              child: _Blob(size: 200, color: const Color(0xFFF48FB1)),
-            ),
+          // Blobs decorativos
+          Positioned(
+            top: -80, left: -60,
+            child: _Blob(size: 280, color: const Color(0xFFB39DDB)),
+          ),
+          Positioned(
+            top: 200, right: -60,
+            child: _Blob(size: 220, color: const Color(0xFF80DEEA)),
+          ),
+          Positioned(
+            bottom: 200, left: -40,
+            child: _Blob(size: 200, color: const Color(0xFFF48FB1)),
+          ),
 
-            // Conteúdo (sem SafeArea para não forçar padding, mas ajustamos manualmente)
-            Stack(
-              children: [
-                // Corpo (resultados/home/webview) – começa abaixo da pílula
-                Positioned.fill(
-                  top: topPadding + 68, // espaço para a pílula + status bar
-                  child: _buildBody(),
-                ),
+          // Corpo principal
+          Positioned.fill(
+            top: topPadding + 68,
+            child: _buildBody(),
+          ),
 
-                // Pílula flutuante – posicionada logo abaixo da status bar
-                Positioned(
-                  top: topPadding + 8,
-                  left: 12,
-                  right: 12,
-                  child: _FloatingPill(
-                    controller: _searchController,
-                    focusNode: _searchFocus,
-                    accent: _accent,
-                    isEditing: _isEditing,
-                    isWebLoading: _webLoading,
-                    webProgress: _webProgress,
-                    blockedCount: _blockedCount,
-                    showBack: _screen != _Screen.home,
-                    leadingIcon: leadingIcon,
-                    leadingIconColor: leadingIconColor,
-                    vpnActive: vpn.isActive,
-                    onSubmit: _onSubmit,
-                    onBack: _goBack,
-                    onMenuTap: () =>
-                        _scaffoldKey.currentState?.openEndDrawer(),
-                    onFireTap: _burnAll,
-                    onTabsTap: _onTabsTap,
-                  ),
-                ),
-              ],
+          // Pílula flutuante sobre a status bar
+          Positioned(
+            top: topPadding + 8,
+            left: 12,
+            right: 12,
+            child: _FloatingPill(
+              controller: _searchController,
+              focusNode: _searchFocus,
+              accent: _accent,
+              isEditing: _isEditing,
+              isWebLoading: _webLoading,
+              webProgress: _webProgress,
+              blockedCount: _blockedCount,
+              showBack: _screen != _Screen.home,
+              leadingIcon: leadingIcon,
+              leadingIconColor: leadingIconColor,
+              vpnActive: vpn.isActive,
+              onSubmit: _onSubmit,
+              onBack: _goBack,
+              onMenuTap: () => _scaffoldKey.currentState?.openEndDrawer(),
+              onFireTap: _burnAll,
+              onTabsTap: _onTabsTap,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -452,13 +453,11 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
         if (_screen == _Screen.results)
           _isSearching
               ? const Center(
-                  child: CircularProgressIndicator(
-                      color: Color(0xFF1A1A2E)))
+                  child: CircularProgressIndicator(color: Color(0xFF1A1A2E)))
               : _errorMsg != null
                   ? Center(
                       child: Text(_errorMsg!,
-                          style: const TextStyle(
-                              color: Colors.redAccent)))
+                          style: const TextStyle(color: Colors.redAccent)))
                   : _searchResponse != null
                       ? _ResultsScreen(
                           response: _searchResponse!,
@@ -502,7 +501,7 @@ class _Blob extends StatelessWidget {
 }
 
 // ================================================================
-//  Pílula flutuante — exatamente como antes, sem alterações
+//  Pílula flutuante
 // ================================================================
 class _FloatingPill extends StatelessWidget {
   final TextEditingController controller;
@@ -575,8 +574,7 @@ class _FloatingPill extends StatelessWidget {
                     child: Row(
                       children: [
                         const SizedBox(width: 16),
-                        Icon(leadingIcon,
-                            size: 16, color: leadingIconColor),
+                        Icon(leadingIcon, size: 16, color: leadingIconColor),
                         const SizedBox(width: 8),
                         Expanded(
                           child: TextField(
@@ -635,8 +633,7 @@ class _FloatingPill extends StatelessWidget {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.shield,
-                                    size: 12, color: accent),
+                                Icon(Icons.shield, size: 12, color: accent),
                                 const SizedBox(width: 2),
                                 Text('$blockedCount',
                                     style: TextStyle(
@@ -750,7 +747,7 @@ class _PillBtn extends StatelessWidget {
 }
 
 // ================================================================
-//  Resultados (sem alterações)
+//  Resultados
 // ================================================================
 class _ResultsScreen extends StatelessWidget {
   final SearchResponse response;
@@ -915,8 +912,7 @@ class _SuggestionsRow extends StatelessWidget {
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(16),
                         child: BackdropFilter(
-                          filter:
-                              ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                           child: Container(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 12, vertical: 6),
@@ -943,7 +939,7 @@ class _SuggestionsRow extends StatelessWidget {
 }
 
 // ================================================================
-//  Drawer (sem alterações)
+//  Drawer
 // ================================================================
 class _SettingsDrawer extends StatelessWidget {
   final Color accent;
@@ -984,8 +980,7 @@ class _SettingsDrawer extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Container(
-              margin: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 4),
+              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               decoration: BoxDecoration(
                 color: vpn.isActive
                     ? Colors.green.withOpacity(0.08)
@@ -1035,8 +1030,7 @@ class _SettingsDrawer extends StatelessWidget {
                       fontWeight: FontWeight.w600)),
               subtitle: const Text(
                   'Cookies, cache, histórico e armazenamento',
-                  style: TextStyle(
-                      color: Color(0xFF8A8A8A), fontSize: 12)),
+                  style: TextStyle(color: Color(0xFF8A8A8A), fontSize: 12)),
               trailing: const Icon(Icons.chevron_right,
                   color: Color(0xFFCCCCCC), size: 18),
               onTap: onBurnTap,
@@ -1064,8 +1058,7 @@ class _SettingsDrawer extends StatelessWidget {
     );
   }
 
-  Widget _item(
-      IconData icon, String label, Color color, VoidCallback onTap) {
+  Widget _item(IconData icon, String label, Color color, VoidCallback onTap) {
     return ListTile(
       leading: Icon(icon, color: color, size: 20),
       title: Text(label, style: TextStyle(color: color, fontSize: 15)),
