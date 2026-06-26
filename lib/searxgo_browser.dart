@@ -44,7 +44,7 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
   static const Color _iconGray   = Color(0xFF5F5F5F);
   static const Color _accent     = Color(0xFF00D4FF);
 
-  // Configuração do WebView (sem initialCSS)
+  // Configuração do WebView com fundo transparente
   final InAppWebViewSettings _webSettings = InAppWebViewSettings(
     useShouldOverrideUrlLoading: true,
     useShouldInterceptRequest: true,
@@ -61,6 +61,8 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
     builtInZoomControls: false,
     displayZoomControls: false,
     supportZoom: true,
+    // 🔹 Fundo transparente para mostrar o gradiente do app
+    backgroundColor: Colors.transparent,
     userAgent:
         'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 '
         '(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
@@ -70,7 +72,6 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
   void initState() {
     super.initState();
 
-    // Força edge-to-edge para garantir
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -117,24 +118,51 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
   }
 
   // ================================================================
-  //  Injeção de CSS para esconder o cabeçalho do SearxNG
+  //  Injeção de CSS + MutationObserver para remover o cabeçalho
   // ================================================================
   void _injectHideHeaderCss(InAppWebViewController controller) {
-    const css = """
-      var style = document.createElement('style');
-      style.innerHTML = `
-        #header, .header, #top-bar, .searxng-header, .navbar,
-        .header-container, .nav, .top-nav, .search-header, .header-wrapper {
-          display: none !important;
-        }
-        body {
-          margin-top: 0 !important;
-          padding-top: 0 !important;
-        }
-      `;
-      document.head.appendChild(style);
+    const script = """
+      (function() {
+        // 1. Aplica CSS para esconder o cabeçalho e tornar fundo transparente
+        const style = document.createElement('style');
+        style.innerHTML = `
+          #header, .header, #top-bar, .searxng-header, .navbar,
+          .header-container, .nav, .top-nav, .search-header, .header-wrapper,
+          .header, .nav-header, .main-header {
+            display: none !important;
+          }
+          html, body {
+            background: transparent !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+          body {
+            margin-top: 0 !important;
+            padding-top: 0 !important;
+          }
+        `;
+        document.head.appendChild(style);
+
+        // 2. Remove imediatamente qualquer elemento que já exista
+        const selectors = [
+          '#header', '.header', '#top-bar', '.searxng-header', '.navbar',
+          '.header-container', '.nav', '.top-nav', '.search-header', '.header-wrapper',
+          '.header', '.nav-header', '.main-header'
+        ];
+        selectors.forEach(sel => {
+          document.querySelectorAll(sel).forEach(el => el.remove());
+        });
+
+        // 3. Observa mudanças no DOM para remover novos cabeçalhos
+        const observer = new MutationObserver(() => {
+          selectors.forEach(sel => {
+            document.querySelectorAll(sel).forEach(el => el.remove());
+          });
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+      })();
     """;
-    controller.evaluateJavascript(source: css);
+    controller.evaluateJavascript(source: script);
   }
 
   void _onSubmit(String input) {
@@ -306,7 +334,7 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
       ),
       body: Stack(
         children: [
-          // Gradiente ocupando TODA a tela incluindo status bar
+          // Gradiente ocupando TODA a tela
           Positioned.fill(
             child: Container(
               decoration: const BoxDecoration(
@@ -343,7 +371,7 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
             child: _buildBody(),
           ),
 
-          // Pílula flutuante sobre a status bar
+          // Pílula flutuante
           Positioned(
             top: topPadding + 8,
             left: 12,
@@ -375,7 +403,7 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
   Widget _buildBody() {
     return Stack(
       children: [
-        // WebView
+        // WebView transparente
         Offstage(
           offstage: _screen != _Screen.webview,
           child: InAppWebView(
@@ -387,7 +415,7 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
             onLoadStop: (c, url) {
               final u = url?.toString() ?? '';
               if (u.isNotEmpty && u != 'about:blank') {
-                // Injeta o CSS para remover o cabeçalho preto
+                // Injeta o script para remover cabeçalho e fundo
                 _injectHideHeaderCss(c);
                 setState(() {
                   _webLoading = false;
