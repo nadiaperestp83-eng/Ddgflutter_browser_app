@@ -1,33 +1,58 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_v2ray/flutter_v2ray.dart';
+import 'package:http/http.dart' as http;
 
 // ================================================================
-//  VpnService — Proxy via WARP/Cloudflare no WebView
+//  VpnService — VLESS via flutter_v2ray
 //
-//  Sem pacote nativo (não existe flutter_wireguard no pub.dev).
-//  A estratégia é configurar o WebView para rotear via proxy
-//  HTTP da Cloudflare WARP quando ativo.
-//
-//  WARP proxy mode: usa 127.0.0.1:8080 (Orbot) ou
-//  proxy público da Cloudflare.
+//  Busca servidores VLESS da lista pública do GitHub (ebrasha)
+//  atualizada a cada 30 minutos. Conecta via VPN mode no Android.
+//  Todo tráfego do navegador passa pelo túnel quando ativo.
 // ================================================================
 
 class VpnService extends ChangeNotifier {
   bool _isActive = false;
   bool _isConnecting = false;
   String _status = 'Desconectado';
+  String _serverInfo = '';
 
   bool get isActive => _isActive;
   bool get isConnecting => _isConnecting;
   String get status => _status;
+  String get serverInfo => _serverInfo;
 
-  // Proxy Cloudflare WARP público (modo proxy HTTP)
-  static const String proxyHost = 'proxy.cloudflare-gateway.com';
-  static const int proxyPort = 443;
+  // URL da lista pública VLESS — atualizada a cada 30min
+  static const String _subUrl =
+      'https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list'
+      '/refs/heads/main/V2Ray-Config-By-EbraSha.txt';
 
+  late final FlutterV2ray _v2ray = FlutterV2ray(
+    onStatusChanged: (status) {
+      _isActive = status.state == 'CONNECTED';
+      _isConnecting = status.state == 'CONNECTING';
+      _status = _friendlyStatus(status.state);
+      notifyListeners();
+    },
+  );
+
+  bool _initialized = false;
+
+  Future<void> _init() async {
+    if (_initialized) return;
+    await _v2ray.initializeV2Ray(
+      notificationIconResourceType: 'mipmap',
+      notificationIconResourceName: 'ic_launcher',
+    );
+    _initialized = true;
+  }
+
+  // ── Liga / desliga ───────────────────────────────────────────
   Future<void> toggle() async {
     if (_isConnecting) return;
+
     if (_isActive) {
-      _disconnect();
+      await _disconnect();
     } else {
       await _connect();
     }
@@ -35,22 +60,148 @@ class VpnService extends ChangeNotifier {
 
   Future<void> _connect() async {
     _isConnecting = true;
-    _status = 'Conectando via WARP...';
+    _status = 'Buscando servidor...';
     notifyListeners();
 
-    // Simula tempo de conexão
-    await Future.delayed(const Duration(milliseconds: 800));
+    try {
+      await _init();
 
-    _isActive = true;
-    _isConnecting = false;
-    _status = 'Conectado — Cloudflare WARP';
-    notifyListeners();
+      // 1. Baixa lista de servidores
+      final configs = await _fetchVlessConfigs();
+      if (configs.isEmpty) {
+        _status = 'Nenhum servidor disponível';
+        _isConnecting = false;
+        notifyListeners();
+        return;
+      }
+
+      // 2. Testa os primeiros 5 e pega o mais rápido
+      _status = 'Testando servidores...';
+      notifyListeners();
+
+      V2RayURL? bestConfig;
+      int bestDelay = 9999;
+
+      for (final link in configs.take(5)) {
+        try {
+          final parsed = FlutterV2ray.parseFromURL(link);
+          final delay = await _v2ray.getServerDelay(
+            config: parsed.getFullConfiguration(),
+          );
+          if (delay > 0 && delay < bestDelay) {
+            bestDelay = delay;
+            bestConfig = parsed;
+          }
+        } catch (_) {
+          continue;
+        }
+      }
+
+      if (bestConfig == null) {
+        // Se teste falhou, usa o primeiro da lista
+        bestConfig = FlutterV2ray.parseFromURL(configs.first);
+      }
+
+      // 3. Pede permissão VPN e conecta
+      _status = 'Solicitando permissão...';
+      notifyListeners();
+
+      final hasPermission = await _v2ray.requestPermission();
+      if (!hasPermission) {
+        _status = 'Permissão negada';
+        _isConnecting = false;
+        notifyListeners();
+        return;
+      }
+
+      _serverInfo = bestConfig.remark.isNotEmpty
+          ? bestConfig.remark
+          : 'Servidor público';
+
+      await _v2ray.startV2Ray(
+        remark: _serverInfo,
+        config: bestConfig.getFullConfiguration(),
+        blockedApps: null,      // null = protege todos os apps
+        bypassSubnets: null,
+        proxyOnly: false,       // VPN real, não só proxy local
+        notificationDisconnectButtonName: 'Desconectar',
+      );
+    } catch (e) {
+      _status = 'Erro: ${e.toString().split('\n').first}';
+      _isActive = false;
+      _isConnecting = false;
+      debugPrint('V2Ray error: $e');
+      notifyListeners();
+    }
   }
 
-  void _disconnect() {
-    _isActive = false;
-    _isConnecting = false;
-    _status = 'Desconectado';
+  Future<void> _disconnect() async {
+    _isConnecting = true;
+    _status = 'Desconectando...';
     notifyListeners();
+
+    try {
+      await _v2ray.stopV2Ray();
+    } catch (e) {
+      debugPrint('V2Ray stop error: $e');
+    } finally {
+      _isActive = false;
+      _isConnecting = false;
+      _status = 'Desconectado';
+      _serverInfo = '';
+      notifyListeners();
+    }
+  }
+
+  // ── Baixa e parseia lista VLESS do GitHub ────────────────────
+  Future<List<String>> _fetchVlessConfigs() async {
+    try {
+      final res = await http
+          .get(Uri.parse(_subUrl))
+          .timeout(const Duration(seconds: 10));
+
+      if (res.statusCode != 200) return [];
+
+      // A lista pode ser base64 ou texto direto
+      String body;
+      try {
+        body = utf8.decode(base64.decode(res.body.trim()));
+      } catch (_) {
+        body = res.body;
+      }
+
+      // Filtra só VLESS
+      return body
+          .split('\n')
+          .map((l) => l.trim())
+          .where((l) => l.startsWith('vless://'))
+          .toList();
+    } catch (e) {
+      debugPrint('Fetch configs error: $e');
+      return [];
+    }
+  }
+
+  String _friendlyStatus(String state) {
+    switch (state) {
+      case 'CONNECTED':
+        return 'Conectado — $_serverInfo';
+      case 'CONNECTING':
+        return 'Conectando...';
+      case 'DISCONNECTED':
+        return 'Desconectado';
+      case 'WAITING':
+        return 'Aguardando...';
+      default:
+        return state;
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_isActive) {
+      _v2ray.stopV2Ray().catchError((_) {});
+    }
+    super.dispose();
   }
 }
