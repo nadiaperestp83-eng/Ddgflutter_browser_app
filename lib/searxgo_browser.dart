@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
 import 'searxng_config.dart';
 import 'models/search_result.dart';
+import 'vpn_service.dart';
 
 enum _Screen { home, results, webview }
 
@@ -34,20 +36,21 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
   SearchResponse? _searchResponse;
   String? _errorMsg;
 
-  // Paleta — igual ao DDG
-  static const Color _pageBg   = Color(0xFFEEEEEE); // fundo da página
-  static const Color _barBg    = Color(0xFFF1F1F1); // fundo da barra
-  static const Color _pillBg   = Colors.white;      // pílula de busca
-  static const Color _iconGray = Color(0xFF5F5F5F); // ícones
-  static const Color _hintGray = Color(0xFF8A8A8A); // placeholder
-  static const Color _cardBg   = Color(0xFFFFFFFF); // cards resultado
+  static const Color _pageBg    = Color(0xFFEEEEEE);
+  static const Color _barBg     = Color(0xFFF1F1F1);
+  static const Color _pillBg    = Colors.white;
+  static const Color _iconGray  = Color(0xFF5F5F5F);
+  static const Color _hintGray  = Color(0xFF8A8A8A);
+  static const Color _cardBg    = Color(0xFFFFFFFF);
   static const Color _cardBorder = Color(0xFFE0E0E0);
-  static const Color _textMain = Color(0xFF1A1A1A); // texto principal
-  static const Color _textSub  = Color(0xFF5F5F5F); // texto secundário
-  static const Color _accent   = Color(0xFF00D4FF); // ciano
+  static const Color _textMain  = Color(0xFF1A1A1A);
+  static const Color _textSub   = Color(0xFF5F5F5F);
+  static const Color _accent    = Color(0xFF00D4FF);
 
   final InAppWebViewSettings _webSettings = InAppWebViewSettings(
     useShouldOverrideUrlLoading: true,
+    // ── shouldInterceptRequest ativa bloqueio real de rastreadores ──
+    useShouldInterceptRequest: true,
     javaScriptEnabled: true,
     domStorageEnabled: true,
     databaseEnabled: true,
@@ -242,6 +245,8 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
 
   @override
   Widget build(BuildContext context) {
+    final vpn = context.watch<VpnService>();
+
     IconData leadingIcon;
     Color leadingIconColor;
     if (_isEditing || _screen != _Screen.webview) {
@@ -256,12 +261,13 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
     }
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark, // status bar escura (ícones pretos)
+      value: SystemUiOverlayStyle.dark,
       child: Scaffold(
         key: _scaffoldKey,
-        backgroundColor: _pageBg, // cinza claro — igual DDG
+        backgroundColor: _pageBg,
         endDrawer: _SettingsDrawer(
           accent: _accent,
+          vpn: vpn,
           onBurnTap: () {
             Navigator.pop(context);
             _burnAll();
@@ -281,6 +287,7 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
                 showBack: _screen != _Screen.home,
                 leadingIcon: leadingIcon,
                 leadingIconColor: leadingIconColor,
+                vpnActive: vpn.isActive,
                 onSubmit: _onSubmit,
                 onBack: _goBack,
                 onMenuTap: () => _scaffoldKey.currentState?.openEndDrawer(),
@@ -298,7 +305,7 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
   Widget _buildBody() {
     return Stack(
       children: [
-        // WebView sempre no DOM
+        // ── WebView com shouldInterceptRequest ───────────────
         Offstage(
           offstage: _screen != _Screen.webview,
           child: InAppWebView(
@@ -323,6 +330,8 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
             },
             onProgressChanged: (c, p) =>
                 setState(() => _webProgress = p / 100.0),
+
+            // ── Bloqueio de navegação (URLs de rastreadores) ─
             shouldOverrideUrlLoading: (c, action) async {
               final url = action.request.url?.toString() ?? '';
               if (SearxNGConfig.isTracker(url)) {
@@ -331,13 +340,31 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
               }
               return NavigationActionPolicy.ALLOW;
             },
+
+            // ── shouldInterceptRequest: bloqueia TODOS os
+            //    sub-recursos (scripts, imagens, XHR, fetch)
+            //    de rastreadores — coração do bloqueio real ──
+            shouldInterceptRequest: (c, request) async {
+              final url = request.url.toString();
+              if (SearxNGConfig.isTracker(url)) {
+                setState(() => _blockedCount++);
+                // Retorna resposta vazia — recurso não carrega
+                return WebResourceResponse(
+                  contentType: 'text/plain',
+                  httpStatusCode: 200,
+                  data: Uint8List(0),
+                );
+              }
+              // null = deixa carregar normalmente
+              return null;
+            },
           ),
         ),
 
         // Home
         if (_screen == _Screen.home)
           Container(
-            color: _pageBg, // cinza claro igual à barra
+            color: _pageBg,
             child: Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -345,24 +372,16 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
                   Icon(Icons.shield, size: 64,
                       color: _accent.withOpacity(0.5)),
                   const SizedBox(height: 16),
-                  Text(
-                    SearxNGConfig.appName,
-                    style: const TextStyle(
-                      color: Color(0xFF1A1A2E),
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 2,
-                      fontFamily: 'sans-serif',
-                    ),
-                  ),
+                  Text(SearxNGConfig.appName,
+                      style: const TextStyle(
+                        color: Color(0xFF1A1A2E),
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 2,
+                      )),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Busca privada — sem rastreadores',
-                    style: TextStyle(
-                        color: _iconGray,
-                        fontSize: 14,
-                        fontFamily: 'sans-serif'),
-                  ),
+                  const Text('Busca privada — sem rastreadores',
+                      style: TextStyle(color: _iconGray, fontSize: 14)),
                 ],
               ),
             ),
@@ -373,7 +392,7 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
           _isSearching
               ? Container(
                   color: _pageBg,
-                  child: Center(
+                  child: const Center(
                       child: CircularProgressIndicator(
                           color: Color(0xFF1A1A2E))))
               : _errorMsg != null
@@ -402,13 +421,13 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
 }
 
 // ================================================================
-//  Barra fixa — igual DDG
+//  Barra fixa
 // ================================================================
 class _TopBar extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
   final Color accent;
-  final bool isEditing, isWebLoading, showBack;
+  final bool isEditing, isWebLoading, showBack, vpnActive;
   final double webProgress;
   final int blockedCount;
   final IconData leadingIcon;
@@ -416,8 +435,8 @@ class _TopBar extends StatelessWidget {
   final ValueChanged<String> onSubmit;
   final VoidCallback onBack, onMenuTap, onFireTap, onTabsTap;
 
-  static const Color _barBg   = Color(0xFFF1F1F1);
-  static const Color _pillBg  = Colors.white;
+  static const Color _barBg    = Color(0xFFF1F1F1);
+  static const Color _pillBg   = Colors.white;
   static const Color _iconGray = Color(0xFF5F5F5F);
   static const Color _hintGray = Color(0xFF8A8A8A);
 
@@ -432,6 +451,7 @@ class _TopBar extends StatelessWidget {
     required this.showBack,
     required this.leadingIcon,
     required this.leadingIconColor,
+    required this.vpnActive,
     required this.onSubmit,
     required this.onBack,
     required this.onMenuTap,
@@ -458,6 +478,8 @@ class _TopBar extends StatelessWidget {
                   constraints:
                       const BoxConstraints(minWidth: 32, minHeight: 32),
                 ),
+
+              // Pílula de busca
               Expanded(
                 child: Container(
                   height: 44,
@@ -495,28 +517,52 @@ class _TopBar extends StatelessWidget {
                           textInputAction: TextInputAction.go,
                           keyboardType: TextInputType.url,
                           autocorrect: false,
-                          // Fonte padrão do sistema (igual Chrome/DDG)
                           style: const TextStyle(
                             color: Colors.black87,
                             fontSize: 16,
-                            fontFamily: null, // herda fonte do sistema
                           ),
                           decoration: const InputDecoration(
                             hintText: 'Pesquisar',
                             hintStyle: TextStyle(
-                              color: _hintGray,
-                              fontSize: 16,
-                              fontFamily: null,
-                            ),
+                                color: _hintGray, fontSize: 16),
                             border: InputBorder.none,
                             isDense: true,
                             contentPadding: EdgeInsets.zero,
                           ),
                         ),
                       ),
+
+                      // Ícone VPN na pílula
+                      if (vpnActive)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.vpn_lock,
+                                    size: 13, color: Colors.green),
+                                SizedBox(width: 3),
+                                Text('VPN',
+                                    style: TextStyle(
+                                        color: Colors.green,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                      // Badge trackers
                       if (blockedCount > 0 && !isEditing)
                         Padding(
-                          padding: const EdgeInsets.only(right: 10),
+                          padding: const EdgeInsets.only(right: 8),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -530,12 +576,14 @@ class _TopBar extends StatelessWidget {
                             ],
                           ),
                         )
-                      else
+                      else if (!vpnActive)
                         const SizedBox(width: 4),
                     ],
                   ),
                 ),
               ),
+
+              // Fogo
               IconButton(
                 onPressed: onFireTap,
                 icon: const Icon(Icons.local_fire_department,
@@ -544,6 +592,8 @@ class _TopBar extends StatelessWidget {
                 constraints:
                     const BoxConstraints(minWidth: 36, minHeight: 36),
               ),
+
+              // Abas
               InkWell(
                 onTap: onTabsTap,
                 borderRadius: BorderRadius.circular(6),
@@ -563,6 +613,8 @@ class _TopBar extends StatelessWidget {
                           fontWeight: FontWeight.w600)),
                 ),
               ),
+
+              // Menu
               IconButton(
                 onPressed: onMenuTap,
                 icon: const Icon(Icons.menu, color: _iconGray, size: 22),
@@ -577,8 +629,8 @@ class _TopBar extends StatelessWidget {
             ? LinearProgressIndicator(
                 value: webProgress,
                 backgroundColor: Colors.transparent,
-                valueColor: AlwaysStoppedAnimation<Color>(
-                    const Color(0xFF1A73E8)),
+                valueColor: const AlwaysStoppedAnimation<Color>(
+                    Color(0xFF1A73E8)),
                 minHeight: 3,
               )
             : const SizedBox(height: 1),
@@ -588,7 +640,7 @@ class _TopBar extends StatelessWidget {
 }
 
 // ================================================================
-//  Resultados — fundo cinza claro, cards brancos, fonte sistema
+//  Resultados
 // ================================================================
 class _ResultsScreen extends StatelessWidget {
   final SearchResponse response;
@@ -693,13 +745,11 @@ class _ResultCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 6),
-            // Título estilo Google/DDG — azul
             Text(result.title,
                 style: const TextStyle(
                   color: Color(0xFF1558D6),
                   fontSize: 16,
                   fontWeight: FontWeight.w500,
-                  fontFamily: null, // fonte do sistema
                 )),
             if (result.content.isNotEmpty) ...[
               const SizedBox(height: 4),
@@ -707,11 +757,7 @@ class _ResultCard extends StatelessWidget {
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: textMain,
-                    fontSize: 14,
-                    height: 1.4,
-                    fontFamily: null,
-                  )),
+                      color: textMain, fontSize: 14, height: 1.4)),
             ],
             if (result.publishedDate != null) ...[
               const SizedBox(height: 4),
@@ -744,8 +790,7 @@ class _SuggestionsRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text('Sugestões',
-              style: TextStyle(
-                  color: Color(0xFF5F5F5F), fontSize: 12)),
+              style: TextStyle(color: Color(0xFF5F5F5F), fontSize: 12)),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
@@ -758,15 +803,12 @@ class _SuggestionsRow extends StatelessWidget {
                             horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
                           color: Colors.white,
-                          border: Border.all(
-                              color: const Color(0xFFE0E0E0)),
+                          border: Border.all(color: const Color(0xFFE0E0E0)),
                           borderRadius: BorderRadius.circular(16),
                         ),
                         child: Text(s,
                             style: const TextStyle(
-                              color: Color(0xFF1558D6),
-                              fontSize: 13,
-                            )),
+                                color: Color(0xFF1558D6), fontSize: 13)),
                       ),
                     ))
                 .toList(),
@@ -778,20 +820,22 @@ class _SuggestionsRow extends StatelessWidget {
 }
 
 // ================================================================
-//  Drawer
+//  Drawer com VPN toggle
 // ================================================================
 class _SettingsDrawer extends StatelessWidget {
   final Color accent;
+  final VpnService vpn;
   final VoidCallback onBurnTap;
 
   const _SettingsDrawer({
     required this.accent,
+    required this.vpn,
     required this.onBurnTap,
   });
 
-  static const Color _drawerBg = Color(0xFFF5F5F5);
-  static const Color _headerBg = Color(0xFFEEEEEE);
-  static const Color _iconGray = Color(0xFF5F5F5F);
+  static const Color _drawerBg  = Color(0xFFF5F5F5);
+  static const Color _headerBg  = Color(0xFFEEEEEE);
+  static const Color _iconGray  = Color(0xFF5F5F5F);
 
   @override
   Widget build(BuildContext context) {
@@ -801,6 +845,7 @@ class _SettingsDrawer extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Cabeçalho
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(20),
@@ -817,7 +862,63 @@ class _SettingsDrawer extends StatelessWidget {
                 ],
               ),
             ),
+
             const SizedBox(height: 8),
+
+            // ── VPN Toggle ───────────────────────────────────
+            Container(
+              margin: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: vpn.isActive
+                    ? Colors.green.withOpacity(0.08)
+                    : Colors.red.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: vpn.isActive
+                      ? Colors.green.withOpacity(0.3)
+                      : Colors.red.withOpacity(0.2),
+                ),
+              ),
+              child: ListTile(
+                leading: Icon(
+                  Icons.vpn_lock,
+                  color: vpn.isActive ? Colors.green : Colors.red,
+                  size: 22,
+                ),
+                title: Text(
+                  'VPN — WARP',
+                  style: TextStyle(
+                    color: vpn.isActive ? Colors.green : _iconGray,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                subtitle: Text(
+                  vpn.status,
+                  style: TextStyle(
+                    color: vpn.isActive
+                        ? Colors.green.withOpacity(0.8)
+                        : const Color(0xFF8A8A8A),
+                    fontSize: 12,
+                  ),
+                ),
+                trailing: vpn.isConnecting
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.green),
+                      )
+                    : Switch(
+                        value: vpn.isActive,
+                        onChanged: (_) => vpn.toggle(),
+                        activeColor: Colors.green,
+                      ),
+              ),
+            ),
+
+            const Divider(color: Color(0xFFE0E0E0), height: 16),
 
             // Botão fogo
             ListTile(
@@ -830,7 +931,8 @@ class _SettingsDrawer extends StatelessWidget {
                       fontWeight: FontWeight.w600)),
               subtitle: const Text(
                   'Cookies, cache, histórico e armazenamento',
-                  style: TextStyle(color: Color(0xFF8A8A8A), fontSize: 12)),
+                  style: TextStyle(
+                      color: Color(0xFF8A8A8A), fontSize: 12)),
               trailing: const Icon(Icons.chevron_right,
                   color: Color(0xFFCCCCCC), size: 18),
               onTap: onBurnTap,
@@ -861,11 +963,11 @@ class _SettingsDrawer extends StatelessWidget {
     );
   }
 
-  Widget _item(IconData icon, String label, Color color, VoidCallback onTap) {
+  Widget _item(
+      IconData icon, String label, Color color, VoidCallback onTap) {
     return ListTile(
       leading: Icon(icon, color: color, size: 20),
-      title: Text(label,
-          style: TextStyle(color: color, fontSize: 15)),
+      title: Text(label, style: TextStyle(color: color, fontSize: 15)),
       trailing: const Icon(Icons.chevron_right,
           color: Color(0xFFCCCCCC), size: 18),
       onTap: onTap,
