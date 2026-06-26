@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'searxng_config.dart';
 import 'models/search_result.dart';
 import 'vpn_service.dart';
+import 'dart:ui';
 
 enum _Screen { home, results, webview }
 
