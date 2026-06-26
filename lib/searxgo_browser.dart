@@ -34,8 +34,17 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
   SearchResponse? _searchResponse;
   String? _errorMsg;
 
-  // Cor única para barra E fundo
-  static const Color _bg = Color(0xFF1A1A2E);
+  // Paleta — igual ao DDG
+  static const Color _pageBg   = Color(0xFFEEEEEE); // fundo da página
+  static const Color _barBg    = Color(0xFFF1F1F1); // fundo da barra
+  static const Color _pillBg   = Colors.white;      // pílula de busca
+  static const Color _iconGray = Color(0xFF5F5F5F); // ícones
+  static const Color _hintGray = Color(0xFF8A8A8A); // placeholder
+  static const Color _cardBg   = Color(0xFFFFFFFF); // cards resultado
+  static const Color _cardBorder = Color(0xFFE0E0E0);
+  static const Color _textMain = Color(0xFF1A1A1A); // texto principal
+  static const Color _textSub  = Color(0xFF5F5F5F); // texto secundário
+  static const Color _accent   = Color(0xFF00D4FF); // ciano
 
   final InAppWebViewSettings _webSettings = InAppWebViewSettings(
     useShouldOverrideUrlLoading: true,
@@ -52,7 +61,6 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
     builtInZoomControls: false,
     displayZoomControls: false,
     supportZoom: true,
-    disableDefaultErrorPage: false,
     userAgent:
         'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 '
         '(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
@@ -180,16 +188,10 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
     }
   }
 
-  // ── Botão fogo: limpa tudo como o DDG ───────────────────────
   Future<void> _burnAll() async {
-    // 1. Cookies
     await CookieManager.instance().deleteAllCookies();
-
-    // 2. Cache + histórico do WebView
     await _webController?.clearCache();
     await _webController?.clearHistory();
-
-    // 3. DOM Storage / localStorage / IndexedDB via JS
     await _webController?.evaluateJavascript(source: '''
       try { localStorage.clear(); } catch(e) {}
       try { sessionStorage.clear(); } catch(e) {}
@@ -199,12 +201,9 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
         });
       } catch(e) {}
     ''');
-
-    // 4. Carrega blank e reseta estado
     await _webController?.loadUrl(
       urlRequest: URLRequest(url: WebUri('about:blank')),
     );
-
     if (mounted) {
       setState(() {
         _screen = _Screen.home;
@@ -217,19 +216,16 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
         _currentIsHttps = false;
         _currentUrl = '';
       });
-
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Row(
-            children: [
-              Icon(Icons.local_fire_department,
-                  color: Color(0xFFE07A2A), size: 18),
-              SizedBox(width: 8),
-              Text('Dados de navegação apagados'),
-            ],
-          ),
+          content: Row(children: [
+            Icon(Icons.local_fire_department,
+                color: Color(0xFFE07A2A), size: 18),
+            SizedBox(width: 8),
+            Text('Dados de navegação apagados'),
+          ]),
           duration: Duration(seconds: 2),
-          backgroundColor: Color(0xFF1A1A2E),
+          backgroundColor: Color(0xFF333333),
         ),
       );
     }
@@ -246,30 +242,26 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
 
   @override
   Widget build(BuildContext context) {
-    final accent = Color(SearxNGConfig.accentColor);
-    const neutralIconColor = Color(0xFF5F5F5F);
-
     IconData leadingIcon;
     Color leadingIconColor;
     if (_isEditing || _screen != _Screen.webview) {
       leadingIcon = Icons.search;
-      leadingIconColor = neutralIconColor;
+      leadingIconColor = _iconGray;
     } else if (_currentIsHttps) {
       leadingIcon = Icons.lock_outline;
-      leadingIconColor = accent;
+      leadingIconColor = _iconGray;
     } else {
       leadingIcon = Icons.public;
-      leadingIconColor = neutralIconColor;
+      leadingIconColor = _iconGray;
     }
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
+      value: SystemUiOverlayStyle.dark, // status bar escura (ícones pretos)
       child: Scaffold(
         key: _scaffoldKey,
-        backgroundColor: _bg, // mesma cor da barra
+        backgroundColor: _pageBg, // cinza claro — igual DDG
         endDrawer: _SettingsDrawer(
-          accent: accent,
-          barColor: _bg,
+          accent: _accent,
           onBurnTap: () {
             Navigator.pop(context);
             _burnAll();
@@ -281,7 +273,7 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
               _TopBar(
                 controller: _searchController,
                 focusNode: _searchFocus,
-                accent: accent,
+                accent: _accent,
                 isEditing: _isEditing,
                 isWebLoading: _webLoading,
                 webProgress: _webProgress,
@@ -295,7 +287,7 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
                 onFireTap: _burnAll,
                 onTabsTap: _onTabsTap,
               ),
-              Expanded(child: _buildBody(accent)),
+              Expanded(child: _buildBody()),
             ],
           ),
         ),
@@ -303,9 +295,10 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
     );
   }
 
-  Widget _buildBody(Color accent) {
+  Widget _buildBody() {
     return Stack(
       children: [
+        // WebView sempre no DOM
         Offstage(
           offstage: _screen != _Screen.webview,
           child: InAppWebView(
@@ -340,19 +333,65 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
             },
           ),
         ),
+
+        // Home
         if (_screen == _Screen.home)
-          _HomeScreen(accent: accent),
+          Container(
+            color: _pageBg, // cinza claro igual à barra
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.shield, size: 64,
+                      color: _accent.withOpacity(0.5)),
+                  const SizedBox(height: 16),
+                  Text(
+                    SearxNGConfig.appName,
+                    style: const TextStyle(
+                      color: Color(0xFF1A1A2E),
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 2,
+                      fontFamily: 'sans-serif',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Busca privada — sem rastreadores',
+                    style: TextStyle(
+                        color: _iconGray,
+                        fontSize: 14,
+                        fontFamily: 'sans-serif'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+        // Resultados
         if (_screen == _Screen.results)
           _isSearching
-              ? Center(child: CircularProgressIndicator(color: accent))
+              ? Container(
+                  color: _pageBg,
+                  child: Center(
+                      child: CircularProgressIndicator(
+                          color: Color(0xFF1A1A2E))))
               : _errorMsg != null
-                  ? Center(
-                      child: Text(_errorMsg!,
-                          style: const TextStyle(color: Colors.redAccent)))
+                  ? Container(
+                      color: _pageBg,
+                      child: Center(
+                          child: Text(_errorMsg!,
+                              style: const TextStyle(
+                                  color: Colors.redAccent))))
                   : _searchResponse != null
                       ? _ResultsScreen(
                           response: _searchResponse!,
-                          accent: accent,
+                          accent: _accent,
+                          pageBg: _pageBg,
+                          cardBg: _cardBg,
+                          cardBorder: _cardBorder,
+                          textMain: _textMain,
+                          textSub: _textSub,
                           onResultTap: _loadInWebView,
                           onSuggestionTap: _doSearch,
                         )
@@ -363,7 +402,7 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
 }
 
 // ================================================================
-//  Barra fixa estilo DDG
+//  Barra fixa — igual DDG
 // ================================================================
 class _TopBar extends StatelessWidget {
   final TextEditingController controller;
@@ -376,6 +415,11 @@ class _TopBar extends StatelessWidget {
   final Color leadingIconColor;
   final ValueChanged<String> onSubmit;
   final VoidCallback onBack, onMenuTap, onFireTap, onTabsTap;
+
+  static const Color _barBg   = Color(0xFFF1F1F1);
+  static const Color _pillBg  = Colors.white;
+  static const Color _iconGray = Color(0xFF5F5F5F);
+  static const Color _hintGray = Color(0xFF8A8A8A);
 
   const _TopBar({
     required this.controller,
@@ -395,11 +439,6 @@ class _TopBar extends StatelessWidget {
     required this.onTabsTap,
   });
 
-  static const Color _barBg = Color(0xFFF1F1F1);
-  static const Color _pillBg = Colors.white;
-  static const Color _iconDark = Color(0xFF5F5F5F);
-  static const Color _hintColor = Color(0xFF8A8A8A);
-
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -414,7 +453,7 @@ class _TopBar extends StatelessWidget {
                 IconButton(
                   onPressed: onBack,
                   icon: const Icon(Icons.arrow_back,
-                      color: _iconDark, size: 20),
+                      color: _iconGray, size: 20),
                   padding: EdgeInsets.zero,
                   constraints:
                       const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -456,12 +495,19 @@ class _TopBar extends StatelessWidget {
                           textInputAction: TextInputAction.go,
                           keyboardType: TextInputType.url,
                           autocorrect: false,
+                          // Fonte padrão do sistema (igual Chrome/DDG)
                           style: const TextStyle(
-                              color: Colors.black87, fontSize: 15),
+                            color: Colors.black87,
+                            fontSize: 16,
+                            fontFamily: null, // herda fonte do sistema
+                          ),
                           decoration: const InputDecoration(
                             hintText: 'Pesquisar',
                             hintStyle: TextStyle(
-                                color: _hintColor, fontSize: 15),
+                              color: _hintGray,
+                              fontSize: 16,
+                              fontFamily: null,
+                            ),
                             border: InputBorder.none,
                             isDense: true,
                             contentPadding: EdgeInsets.zero,
@@ -490,7 +536,6 @@ class _TopBar extends StatelessWidget {
                   ),
                 ),
               ),
-              // Fogo
               IconButton(
                 onPressed: onFireTap,
                 icon: const Icon(Icons.local_fire_department,
@@ -499,7 +544,6 @@ class _TopBar extends StatelessWidget {
                 constraints:
                     const BoxConstraints(minWidth: 36, minHeight: 36),
               ),
-              // Abas
               InkWell(
                 onTap: onTabsTap,
                 borderRadius: BorderRadius.circular(6),
@@ -508,21 +552,20 @@ class _TopBar extends StatelessWidget {
                   height: 28,
                   margin: const EdgeInsets.symmetric(horizontal: 2),
                   decoration: BoxDecoration(
-                    border: Border.all(color: _iconDark, width: 1.6),
+                    border: Border.all(color: _iconGray, width: 1.6),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   alignment: Alignment.center,
                   child: const Text('1',
                       style: TextStyle(
-                          color: _iconDark,
+                          color: _iconGray,
                           fontSize: 12,
                           fontWeight: FontWeight.w600)),
                 ),
               ),
-              // Menu
               IconButton(
                 onPressed: onMenuTap,
-                icon: const Icon(Icons.menu, color: _iconDark, size: 22),
+                icon: const Icon(Icons.menu, color: _iconGray, size: 22),
                 padding: EdgeInsets.zero,
                 constraints:
                     const BoxConstraints(minWidth: 36, minHeight: 36),
@@ -534,66 +577,33 @@ class _TopBar extends StatelessWidget {
             ? LinearProgressIndicator(
                 value: webProgress,
                 backgroundColor: Colors.transparent,
-                valueColor: AlwaysStoppedAnimation<Color>(accent),
-                minHeight: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(
+                    const Color(0xFF1A73E8)),
+                minHeight: 3,
               )
-            : const SizedBox(height: 2),
+            : const SizedBox(height: 1),
       ],
     );
   }
 }
 
 // ================================================================
-//  Tela inicial — fundo igual à barra
-// ================================================================
-class _HomeScreen extends StatelessWidget {
-  final Color accent;
-  const _HomeScreen({required this.accent});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: const Color(0xFF1A1A2E), // mesma da barra
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.shield, size: 64, color: accent.withOpacity(0.4)),
-            const SizedBox(height: 16),
-            Text(
-              SearxNGConfig.appName,
-              style: TextStyle(
-                color: accent,
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 2,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Busca privada — sem rastreadores',
-              style: TextStyle(
-                  color: Colors.white.withOpacity(0.4), fontSize: 13),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ================================================================
-//  Resultados JSON em cards
+//  Resultados — fundo cinza claro, cards brancos, fonte sistema
 // ================================================================
 class _ResultsScreen extends StatelessWidget {
   final SearchResponse response;
-  final Color accent;
+  final Color accent, pageBg, cardBg, cardBorder, textMain, textSub;
   final ValueChanged<String> onResultTap;
   final ValueChanged<String> onSuggestionTap;
 
   const _ResultsScreen({
     required this.response,
     required this.accent,
+    required this.pageBg,
+    required this.cardBg,
+    required this.cardBorder,
+    required this.textMain,
+    required this.textSub,
     required this.onResultTap,
     required this.onSuggestionTap,
   });
@@ -601,7 +611,7 @@ class _ResultsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: const Color(0xFF1A1A2E), // mesma da barra
+      color: pageBg,
       child: ListView.builder(
         padding: const EdgeInsets.only(top: 8, bottom: 24),
         itemCount: response.results.length +
@@ -616,7 +626,14 @@ class _ResultsScreen extends StatelessWidget {
           }
           final r = response.results[index];
           return _ResultCard(
-              result: r, accent: accent, onTap: () => onResultTap(r.url));
+            result: r,
+            accent: accent,
+            cardBg: cardBg,
+            cardBorder: cardBorder,
+            textMain: textMain,
+            textSub: textSub,
+            onTap: () => onResultTap(r.url),
+          );
         },
       ),
     );
@@ -625,11 +642,18 @@ class _ResultsScreen extends StatelessWidget {
 
 class _ResultCard extends StatelessWidget {
   final SearchResult result;
-  final Color accent;
+  final Color accent, cardBg, cardBorder, textMain, textSub;
   final VoidCallback onTap;
 
-  const _ResultCard(
-      {required this.result, required this.accent, required this.onTap});
+  const _ResultCard({
+    required this.result,
+    required this.accent,
+    required this.cardBg,
+    required this.cardBorder,
+    required this.textMain,
+    required this.textSub,
+    required this.onTap,
+  });
 
   String get _domain {
     try {
@@ -647,49 +671,52 @@ class _ResultCard extends StatelessWidget {
         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.05),
+          color: cardBg,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white.withOpacity(0.07)),
+          border: Border.all(color: cardBorder),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                const Icon(Icons.language, size: 12, color: Colors.white38),
+                Icon(Icons.language, size: 12, color: textSub),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(_domain,
-                      style: const TextStyle(
-                          color: Colors.white38, fontSize: 11),
+                      style: TextStyle(color: textSub, fontSize: 12),
                       overflow: TextOverflow.ellipsis),
                 ),
                 Text(result.engine,
                     style: TextStyle(
-                        color: accent.withOpacity(0.5), fontSize: 10)),
+                        color: textSub.withOpacity(0.6), fontSize: 10)),
               ],
             ),
             const SizedBox(height: 6),
+            // Título estilo Google/DDG — azul
             Text(result.title,
-                style: TextStyle(
-                    color: accent,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600)),
+                style: const TextStyle(
+                  color: Color(0xFF1558D6),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  fontFamily: null, // fonte do sistema
+                )),
             if (result.content.isNotEmpty) ...[
-              const SizedBox(height: 5),
+              const SizedBox(height: 4),
               Text(result.content,
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      color: Colors.white.withOpacity(0.65),
-                      fontSize: 13,
-                      height: 1.4)),
+                    color: textMain,
+                    fontSize: 14,
+                    height: 1.4,
+                    fontFamily: null,
+                  )),
             ],
             if (result.publishedDate != null) ...[
-              const SizedBox(height: 5),
+              const SizedBox(height: 4),
               Text(result.publishedDate!,
-                  style: const TextStyle(
-                      color: Colors.white24, fontSize: 11)),
+                  style: TextStyle(color: textSub, fontSize: 12)),
             ],
           ],
         ),
@@ -703,10 +730,11 @@ class _SuggestionsRow extends StatelessWidget {
   final Color accent;
   final ValueChanged<String> onTap;
 
-  const _SuggestionsRow(
-      {required this.suggestions,
-      required this.accent,
-      required this.onTap});
+  const _SuggestionsRow({
+    required this.suggestions,
+    required this.accent,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -716,7 +744,8 @@ class _SuggestionsRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text('Sugestões',
-              style: TextStyle(color: Colors.white38, fontSize: 12)),
+              style: TextStyle(
+                  color: Color(0xFF5F5F5F), fontSize: 12)),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
@@ -728,13 +757,16 @@ class _SuggestionsRow extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
+                          color: Colors.white,
                           border: Border.all(
-                              color: accent.withOpacity(0.3)),
+                              color: const Color(0xFFE0E0E0)),
                           borderRadius: BorderRadius.circular(16),
                         ),
                         child: Text(s,
-                            style:
-                                TextStyle(color: accent, fontSize: 13)),
+                            style: const TextStyle(
+                              color: Color(0xFF1558D6),
+                              fontSize: 13,
+                            )),
                       ),
                     ))
                 .toList(),
@@ -746,31 +778,33 @@ class _SuggestionsRow extends StatelessWidget {
 }
 
 // ================================================================
-//  Drawer — com botão fogo
+//  Drawer
 // ================================================================
 class _SettingsDrawer extends StatelessWidget {
-  final Color accent, barColor;
+  final Color accent;
   final VoidCallback onBurnTap;
 
   const _SettingsDrawer({
     required this.accent,
-    required this.barColor,
     required this.onBurnTap,
   });
+
+  static const Color _drawerBg = Color(0xFFF5F5F5);
+  static const Color _headerBg = Color(0xFFEEEEEE);
+  static const Color _iconGray = Color(0xFF5F5F5F);
 
   @override
   Widget build(BuildContext context) {
     return Drawer(
-      backgroundColor: const Color(0xFF1A1A2E), // mesma da barra
+      backgroundColor: _drawerBg,
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Cabeçalho
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(20),
-              color: barColor,
+              color: _headerBg,
               child: Row(
                 children: [
                   Icon(Icons.shield, color: accent, size: 22),
@@ -785,7 +819,7 @@ class _SettingsDrawer extends StatelessWidget {
             ),
             const SizedBox(height: 8),
 
-            // Botão fogo — apaga tudo
+            // Botão fogo
             ListTile(
               leading: const Icon(Icons.local_fire_department,
                   color: Color(0xFFE07A2A), size: 22),
@@ -796,31 +830,30 @@ class _SettingsDrawer extends StatelessWidget {
                       fontWeight: FontWeight.w600)),
               subtitle: const Text(
                   'Cookies, cache, histórico e armazenamento',
-                  style: TextStyle(color: Colors.white38, fontSize: 12)),
+                  style: TextStyle(color: Color(0xFF8A8A8A), fontSize: 12)),
               trailing: const Icon(Icons.chevron_right,
-                  color: Colors.white24, size: 18),
+                  color: Color(0xFFCCCCCC), size: 18),
               onTap: onBurnTap,
             ),
 
-            const Divider(color: Colors.white12, height: 1),
+            const Divider(color: Color(0xFFE0E0E0), height: 1),
             const SizedBox(height: 8),
 
-            _item(Icons.tune, 'Configurações do navegador', accent,
+            _item(Icons.tune, 'Configurações do navegador', _iconGray,
                 () => Navigator.pop(context)),
-            _item(Icons.search, 'Instância SearxNG', accent,
+            _item(Icons.search, 'Instância SearxNG', _iconGray,
                 () => Navigator.pop(context)),
-            _item(Icons.security, 'Privacidade & Trackers', accent,
+            _item(Icons.security, 'Privacidade & Trackers', _iconGray,
                 () => Navigator.pop(context)),
-            _item(Icons.info_outline, 'Sobre', accent,
+            _item(Icons.info_outline, 'Sobre', _iconGray,
                 () => Navigator.pop(context)),
 
             const Spacer(),
             Padding(
               padding: const EdgeInsets.all(16),
               child: Text(SearxNGConfig.baseUrl,
-                  style: TextStyle(
-                      color: Colors.white.withOpacity(0.3),
-                      fontSize: 11)),
+                  style: const TextStyle(
+                      color: Color(0xFFAAAAAA), fontSize: 11)),
             ),
           ],
         ),
@@ -828,14 +861,13 @@ class _SettingsDrawer extends StatelessWidget {
     );
   }
 
-  Widget _item(
-      IconData icon, String label, Color accent, VoidCallback onTap) {
+  Widget _item(IconData icon, String label, Color color, VoidCallback onTap) {
     return ListTile(
-      leading: Icon(icon, color: accent, size: 20),
+      leading: Icon(icon, color: color, size: 20),
       title: Text(label,
-          style: const TextStyle(color: Colors.white70, fontSize: 15)),
+          style: TextStyle(color: color, fontSize: 15)),
       trailing: const Icon(Icons.chevron_right,
-          color: Colors.white24, size: 18),
+          color: Color(0xFFCCCCCC), size: 18),
       onTap: onTap,
     );
   }
