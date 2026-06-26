@@ -10,7 +10,7 @@ import 'vpn_service.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Força status bar transparente com ícones escuros
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.dark,
@@ -18,9 +18,6 @@ Future<void> main() async {
     systemNavigationBarColor: Colors.transparent,
     systemNavigationBarIconBrightness: Brightness.dark,
   ));
-
-  // Estende o app atrás da status bar e navigation bar
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
   if (!kReleaseMode && defaultTargetPlatform == TargetPlatform.android) {
     await InAppWebViewController.setWebContentsDebuggingEnabled(true);
@@ -48,6 +45,7 @@ class SearxGoApp extends StatelessWidget {
         appBarTheme: const AppBarTheme(
           toolbarHeight: 0,
           elevation: 0,
+          scrolledUnderElevation: 0,
           backgroundColor: Colors.transparent,
           foregroundColor: Colors.transparent,
           shadowColor: Colors.transparent,
@@ -56,9 +54,19 @@ class SearxGoApp extends StatelessWidget {
         colorScheme: const ColorScheme.light(
           primary: Color(0xFF1A1A2E),
           secondary: Color(0xFF00D4FF),
+          surface: Colors.transparent,
+          background: Colors.transparent,
         ),
         splashFactory: NoSplash.splashFactory,
+        useMaterial3: true,
       ),
+      builder: (context, child) {
+        // Remove qualquer AppBar/header que o sistema injete
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
+          child: child!,
+        );
+      },
       home: const SearxGoBrowser(),
     );
   }
