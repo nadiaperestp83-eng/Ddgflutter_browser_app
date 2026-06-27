@@ -2,12 +2,6 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'searxng_config.dart';
 
-// ================================================================
-//  PrivacyScreen — Privacidade & Trackers
-//  Mostra contador por domínio + toggles por categoria
-//  Design glassmorphism — sem AppBar, sem barra preta
-// ================================================================
-
 class PrivacyScreen extends StatefulWidget {
   final int totalBlocked;
   final Map<String, int> blockedByDomain;
@@ -23,79 +17,55 @@ class PrivacyScreen extends StatefulWidget {
 }
 
 class _PrivacyScreenState extends State<PrivacyScreen> {
-  // Toggles por categoria — lidos do SearxNGConfig
   bool _blockAnalytics = true;
   bool _blockAds       = true;
   bool _blockSocial    = true;
 
-  // Categorias mapeadas
-  static const _analytics = [
-    'google-analytics.com',
-    'googletagmanager.com',
-    'hotjar.com',
-    'segment.com',
-    'mixpanel.com',
-    'amplitude.com',
-  ];
-
-  static const _ads = [
-    'doubleclick.net',
-    'ads.twitter.com',
-    'analytics.tiktok.com',
-  ];
-
-  static const _social = [
-    'facebook.com/tr',
-    'connect.facebook.net',
-    'intercom.io',
-    'crisp.chat',
-  ];
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Sem AppBar — fundo gradiente igual à home
       backgroundColor: Colors.transparent,
       body: Stack(
         children: [
-          // Fundo gradiente
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Color(0xFFDFE9FF),
-                  Color(0xFFEDE7F6),
-                  Color(0xFFE0F7FA),
-                ],
+          // Fundo gradiente igual à home
+          Positioned.fill(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xFFDFE9FF),
+                    Color(0xFFEDE7F6),
+                    Color(0xFFE0F7FA),
+                  ],
+                ),
               ),
             ),
           ),
 
           // Blobs
           Positioned(top: -60, left: -60,
-            child: _blob(260, const Color(0xFFB39DDB))),
+              child: _blob(260, const Color(0xFFB39DDB))),
           Positioned(top: 200, right: -50,
-            child: _blob(200, const Color(0xFF80DEEA))),
+              child: _blob(200, const Color(0xFF80DEEA))),
           Positioned(bottom: 150, left: -40,
-            child: _blob(180, const Color(0xFFF48FB1))),
+              child: _blob(180, const Color(0xFFF48FB1))),
 
           // Conteúdo
           SafeArea(
             child: Column(
               children: [
-                // Cabeçalho glass — sem AppBar nativa
+                // Cabeçalho glass sem AppBar nativa
                 _GlassHeader(
                   title: 'Privacidade & Trackers',
                   onBack: () => Navigator.pop(context),
                 ),
-
                 Expanded(
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
                     children: [
-                      // ── Resumo total ──────────────────────
+                      // Resumo total
                       _GlassCard(
                         child: Row(
                           children: [
@@ -112,20 +82,15 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  '${widget.totalBlocked}',
-                                  style: const TextStyle(
-                                    fontSize: 32,
-                                    fontWeight: FontWeight.w800,
-                                    color: Color(0xFF1A1A3E),
-                                  ),
-                                ),
-                                const Text(
-                                  'rastreadores bloqueados',
-                                  style: TextStyle(
-                                      fontSize: 13,
-                                      color: Color(0xFF5F5F5F)),
-                                ),
+                                Text('${widget.totalBlocked}',
+                                    style: const TextStyle(
+                                        fontSize: 32,
+                                        fontWeight: FontWeight.w800,
+                                        color: Color(0xFF1A1A3E))),
+                                const Text('rastreadores bloqueados',
+                                    style: TextStyle(
+                                        fontSize: 13,
+                                        color: Color(0xFF5F5F5F))),
                               ],
                             ),
                           ],
@@ -133,8 +98,6 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                       ),
 
                       const SizedBox(height: 16),
-
-                      // ── Toggles por categoria ─────────────
                       const _SectionLabel('Categorias bloqueadas'),
                       const SizedBox(height: 8),
 
@@ -144,107 +107,65 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                         subtitle: 'Google Analytics, Hotjar, Mixpanel...',
                         value: _blockAnalytics,
                         color: const Color(0xFF7C4DFF),
-                        onChanged: (v) =>
-                            setState(() => _blockAnalytics = v),
+                        onChanged: (v) => setState(() => _blockAnalytics = v),
                       ),
                       const SizedBox(height: 8),
-
                       _CategoryToggle(
                         icon: Icons.campaign,
                         label: 'Publicidade',
                         subtitle: 'DoubleClick, Twitter Ads, TikTok Ads...',
                         value: _blockAds,
                         color: const Color(0xFFE07A2A),
-                        onChanged: (v) =>
-                            setState(() => _blockAds = v),
+                        onChanged: (v) => setState(() => _blockAds = v),
                       ),
                       const SizedBox(height: 8),
-
                       _CategoryToggle(
                         icon: Icons.people,
                         label: 'Redes sociais',
                         subtitle: 'Facebook Pixel, Intercom, Crisp...',
                         value: _blockSocial,
                         color: const Color(0xFF1558D6),
-                        onChanged: (v) =>
-                            setState(() => _blockSocial = v),
+                        onChanged: (v) => setState(() => _blockSocial = v),
                       ),
 
                       const SizedBox(height: 20),
 
-                      // ── Lista por domínio ─────────────────
-                      if (widget.blockedByDomain.isNotEmpty) ...[
-                        const _SectionLabel('Bloqueados por domínio'),
-                        const SizedBox(height: 8),
-                        _GlassCard(
-                          child: Column(
-                            children: widget.blockedByDomain.entries
-                                .toList()
-                              ..sort((a, b) => b.value.compareTo(a.value))
-                              ..take(20).forEach((_) {})
-                              ..asMap()
-                              .entries
-                              .where((e) =>
-                                  e.key <
-                                  widget.blockedByDomain.length)
-                              .map((e) => e.value)
-                              .toList()
-                              .asMap()
-                              .entries
-                              .map((entry) {
-                                final domain =
-                                    entry.value.key;
-                                final count =
-                                    entry.value.value;
-                                final isLast = entry.key ==
-                                    widget.blockedByDomain.length - 1;
-                                return _DomainRow(
-                                  domain: domain,
-                                  count: count,
-                                  showDivider: !isLast,
-                                );
-                              })
-                              .toList(),
-                          ),
-                        ),
-                      ] else ...[
-                        const _SectionLabel('Bloqueados por domínio'),
-                        const SizedBox(height: 8),
-                        _GlassCard(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            child: Center(
-                              child: Text(
-                                'Nenhum rastreador bloqueado ainda.\nNavegue para ver os resultados.',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: const Color(0xFF5F5F5F)
-                                      .withOpacity(0.7),
-                                  fontSize: 13,
+                      // Bloqueados por domínio (sessão atual)
+                      const _SectionLabel('Bloqueados por domínio'),
+                      const SizedBox(height: 8),
+                      _GlassCard(
+                        child: widget.blockedByDomain.isEmpty
+                            ? Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12),
+                                child: Center(
+                                  child: Text(
+                                    'Nenhum rastreador bloqueado ainda.\nNavegue para ver os resultados.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: const Color(0xFF5F5F5F)
+                                          .withOpacity(0.7),
+                                      fontSize: 13,
+                                    ),
+                                  ),
                                 ),
+                              )
+                            : Column(
+                                children: _buildDomainRows(
+                                    widget.blockedByDomain),
                               ),
-                            ),
-                          ),
-                        ),
-                      ],
+                      ),
 
                       const SizedBox(height: 20),
 
-                      // ── Lista completa de domínios monitorados
+                      // Lista completa monitorada
                       const _SectionLabel('Domínios monitorados'),
                       const SizedBox(height: 8),
                       _GlassCard(
                         child: Column(
-                          children: SearxNGConfig.trackerDomains
-                              .asMap()
-                              .entries
-                              .map((e) => _DomainRow(
-                                    domain: e.value,
-                                    count: widget.blockedByDomain[e.value] ?? 0,
-                                    showDivider: e.key <
-                                        SearxNGConfig.trackerDomains.length - 1,
-                                  ))
-                              .toList(),
+                          children: _buildTrackerRows(
+                              SearxNGConfig.trackerDomains,
+                              widget.blockedByDomain),
                         ),
                       ),
                     ],
@@ -256,6 +177,31 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
         ],
       ),
     );
+  }
+
+  // Constrói linhas dos domínios bloqueados na sessão
+  List<Widget> _buildDomainRows(Map<String, int> map) {
+    final entries = map.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return List.generate(entries.length, (i) {
+      return _DomainRow(
+        domain: entries[i].key,
+        count: entries[i].value,
+        showDivider: i < entries.length - 1,
+      );
+    });
+  }
+
+  // Constrói linhas da lista completa de trackers monitorados
+  List<Widget> _buildTrackerRows(
+      List<String> domains, Map<String, int> blocked) {
+    return List.generate(domains.length, (i) {
+      return _DomainRow(
+        domain: domains[i],
+        count: blocked[domains[i]] ?? 0,
+        showDivider: i < domains.length - 1,
+      );
+    });
   }
 
   Widget _blob(double size, Color color) => Container(
@@ -271,7 +217,7 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
       );
 }
 
-// ── Cabeçalho glass (sem AppBar nativa) ─────────────────────────
+// ── Cabeçalho glass sem AppBar nativa ───────────────────────────
 class _GlassHeader extends StatelessWidget {
   final String title;
   final VoidCallback onBack;
@@ -298,14 +244,12 @@ class _GlassHeader extends StatelessWidget {
                 icon: const Icon(Icons.arrow_back,
                     color: Color(0xFF1A1A3E), size: 22),
               ),
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF1A1A3E),
-                ),
-              ),
+              Text(title,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF1A1A3E),
+                  )),
             ],
           ),
         ),
@@ -314,7 +258,7 @@ class _GlassHeader extends StatelessWidget {
   }
 }
 
-// ── Card glass reutilizável ──────────────────────────────────────
+// ── Card glass ───────────────────────────────────────────────────
 class _GlassCard extends StatelessWidget {
   final Widget child;
   const _GlassCard({required this.child});
@@ -469,11 +413,9 @@ class _DomainRow extends StatelessWidget {
               const Icon(Icons.block, size: 14, color: Color(0xFF8A8A8A)),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  domain,
-                  style: const TextStyle(
-                      fontSize: 13, color: Color(0xFF333333)),
-                ),
+                child: Text(domain,
+                    style: const TextStyle(
+                        fontSize: 13, color: Color(0xFF333333))),
               ),
               if (count > 0)
                 Container(
@@ -483,22 +425,18 @@ class _DomainRow extends StatelessWidget {
                     color: const Color(0xFF00D4FF).withOpacity(0.12),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Text(
-                    '$count',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF0097A7),
-                    ),
-                  ),
+                  child: Text('$count',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF0097A7),
+                      )),
                 ),
             ],
           ),
         ),
         if (showDivider)
-          Divider(
-              height: 1,
-              color: Colors.black.withOpacity(0.06)),
+          Divider(height: 1, color: Colors.black.withOpacity(0.06)),
       ],
     );
   }
