@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -8,7 +9,7 @@ import 'package:provider/provider.dart';
 import 'searxng_config.dart';
 import 'models/search_result.dart';
 import 'vpn_service.dart';
-import 'dart:ui';
+import 'privacy_screen.dart';
 
 enum _Screen { home, results, webview }
 
@@ -34,6 +35,9 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
   int _blockedCount = 0;
   bool _currentIsHttps = false;
   String _currentUrl = '';
+
+  // ── Mapa de trackers bloqueados por domínio ──────────────────
+  Map<String, int> _blockedByDomain = {};
 
   SearchResponse? _searchResponse;
   String? _errorMsg;
@@ -115,14 +119,10 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
     }
   }
 
-  // ================================================================
-  //  Script agressivo para remover cabeçalho e fundo opaco
-  // ================================================================
   void _injectHideHeaderCss(InAppWebViewController controller) {
     const script = """
       (function() {
         function removeHeaders() {
-          // Seletores genéricos
           const selectors = [
             'header', '.header', '#header', 'nav', '.nav', '#nav',
             '.navbar', '#navbar', '.top-bar', '#top-bar',
@@ -138,28 +138,21 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
               }
             });
           });
-          // Remove elementos com texto "SearxNG" ou "Pesquisar" no topo
           document.querySelectorAll('*').forEach(el => {
             const text = el.textContent || '';
-            if ((text.includes('SearxNG') || text.includes('Pesquisar')) && 
+            if ((text.includes('SearxNG') || text.includes('Pesquisar')) &&
                 el.getBoundingClientRect().top < 150) {
               el.remove();
             }
           });
-          // Torna fundo transparente
           document.documentElement.style.background = 'transparent !important';
           document.body.style.background = 'transparent !important';
           document.body.style.margin = '0';
           document.body.style.padding = '0';
         }
-
         removeHeaders();
-
-        const observer = new MutationObserver(() => {
-          removeHeaders();
-        });
+        const observer = new MutationObserver(() => { removeHeaders(); });
         observer.observe(document.body, { childList: true, subtree: true });
-
         setTimeout(removeHeaders, 500);
         setTimeout(removeHeaders, 1000);
         setTimeout(removeHeaders, 2000);
@@ -169,9 +162,6 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
     controller.evaluateJavascript(source: script);
   }
 
-  // ================================================================
-  //  Carregar URL com tema simple
-  // ================================================================
   void _loadInWebView(String url) {
     final uri = Uri.parse(url);
     final cleanUrl = uri
@@ -284,6 +274,7 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
         _searchResponse = null;
         _errorMsg = null;
         _blockedCount = 0;
+        _blockedByDomain = {}; // ← limpa mapa
         _webProgress = 0;
         _webLoading = false;
         _currentIsHttps = false;
@@ -313,6 +304,15 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
     );
   }
 
+  // ── Registra tracker bloqueado por domínio ───────────────────
+  void _registerBlocked(String url) {
+    final host = Uri.tryParse(url)?.host ?? url;
+    setState(() {
+      _blockedCount++;
+      _blockedByDomain[host] = (_blockedByDomain[host] ?? 0) + 1;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final vpn = context.watch<VpnService>();
@@ -339,6 +339,8 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
       endDrawer: _SettingsDrawer(
         accent: _accent,
         vpn: vpn,
+        blockedCount: _blockedCount,
+        blockedByDomain: _blockedByDomain,
         onBurnTap: () {
           Navigator.pop(context);
           _burnAll();
@@ -346,7 +348,6 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
       ),
       body: Stack(
         children: [
-          // GRADIENTE OCUPA TODA A TELA (inclusive atrás da status bar)
           Positioned.fill(
             child: Container(
               decoration: const BoxDecoration(
@@ -362,25 +363,13 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
               ),
             ),
           ),
-          // Blobs decorativos
-          Positioned(
-            top: -80, left: -60,
-            child: _Blob(size: 280, color: const Color(0xFFB39DDB)),
-          ),
-          Positioned(
-            top: 200, right: -60,
-            child: _Blob(size: 220, color: const Color(0xFF80DEEA)),
-          ),
-          Positioned(
-            bottom: 200, left: -40,
-            child: _Blob(size: 200, color: const Color(0xFFF48FB1)),
-          ),
-          // Corpo principal - top: 0 (sem topPadding)
-          Positioned.fill(
-            top: 0, // <-- AGORA OCUPA TODA A TELA
-            child: _buildBody(),
-          ),
-          // Pílula flutuante - mantém topPadding para não ficar atrás do notch
+          Positioned(top: -80, left: -60,
+              child: _Blob(size: 280, color: const Color(0xFFB39DDB))),
+          Positioned(top: 200, right: -60,
+              child: _Blob(size: 220, color: const Color(0xFF80DEEA))),
+          Positioned(bottom: 200, left: -40,
+              child: _Blob(size: 200, color: const Color(0xFFF48FB1))),
+          Positioned.fill(top: 0, child: _buildBody()),
           Positioned(
             top: topPadding + 8,
             left: 12,
@@ -412,7 +401,6 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
   Widget _buildBody() {
     return Stack(
       children: [
-        // WebView
         Offstage(
           offstage: _screen != _Screen.webview,
           child: InAppWebView(
@@ -424,11 +412,13 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
             onLoadStop: (c, url) {
               final u = url?.toString() ?? '';
               if (u.isNotEmpty && u != 'about:blank') {
-                // Injeção múltipla para garantir
                 _injectHideHeaderCss(c);
-                Timer(const Duration(milliseconds: 500), () => _injectHideHeaderCss(c));
-                Timer(const Duration(seconds: 1), () => _injectHideHeaderCss(c));
-                Timer(const Duration(seconds: 2), () => _injectHideHeaderCss(c));
+                Timer(const Duration(milliseconds: 500),
+                    () => _injectHideHeaderCss(c));
+                Timer(const Duration(seconds: 1),
+                    () => _injectHideHeaderCss(c));
+                Timer(const Duration(seconds: 2),
+                    () => _injectHideHeaderCss(c));
                 setState(() {
                   _webLoading = false;
                   _webProgress = 1;
@@ -442,22 +432,22 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
             },
             onProgressChanged: (c, p) {
               setState(() => _webProgress = p / 100.0);
-              if (p >= 70) {
-                _injectHideHeaderCss(c);
-              }
+              if (p >= 70) _injectHideHeaderCss(c);
             },
+            // ── Bloqueio de navegação ────────────────────────
             shouldOverrideUrlLoading: (c, action) async {
               final url = action.request.url?.toString() ?? '';
               if (SearxNGConfig.isTracker(url)) {
-                setState(() => _blockedCount++);
+                _registerBlocked(url); // ← usa método centralizado
                 return NavigationActionPolicy.CANCEL;
               }
               return NavigationActionPolicy.ALLOW;
             },
+            // ── Bloqueio de sub-recursos (scripts, XHR, etc) ─
             shouldInterceptRequest: (c, request) async {
               final url = request.url.toString();
               if (SearxNGConfig.isTracker(url)) {
-                setState(() => _blockedCount++);
+                _registerBlocked(url); // ← usa método centralizado
                 return WebResourceResponse(
                   contentType: 'text/plain',
                   statusCode: 200,
@@ -468,7 +458,6 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
             },
           ),
         ),
-        // Home
         if (_screen == _Screen.home)
           Center(
             child: Column(
@@ -493,27 +482,22 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
                       size: 44, color: Color(0xFF80DEEA)),
                 ),
                 const SizedBox(height: 18),
-                const Text(
-                  'SearxGo',
-                  style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF1A1A3E),
-                    letterSpacing: 0.5,
-                  ),
-                ),
+                const Text('SearxGo',
+                    style: TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF1A1A3E),
+                      letterSpacing: 0.5,
+                    )),
                 const SizedBox(height: 6),
-                Text(
-                  'Busca privada — sem rastreadores',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: const Color(0xFF3C3C64).withOpacity(0.55),
-                  ),
-                ),
+                Text('Busca privada — sem rastreadores',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: const Color(0xFF3C3C64).withOpacity(0.55),
+                    )),
               ],
             ),
           ),
-        // Resultados
         if (_screen == _Screen.results)
           _isSearching
               ? const Center(
@@ -541,7 +525,7 @@ class _SearxGoBrowserState extends State<SearxGoBrowser> {
 }
 
 // ================================================================
-//  Blob decorativo
+//  Blob
 // ================================================================
 class _Blob extends StatelessWidget {
   final double size;
@@ -1003,17 +987,21 @@ class _SuggestionsRow extends StatelessWidget {
 }
 
 // ================================================================
-//  Drawer
+//  Drawer — com navegação para PrivacyScreen
 // ================================================================
 class _SettingsDrawer extends StatelessWidget {
   final Color accent;
   final VpnService vpn;
   final VoidCallback onBurnTap;
+  final int blockedCount;
+  final Map<String, int> blockedByDomain;
 
   const _SettingsDrawer({
     required this.accent,
     required this.vpn,
     required this.onBurnTap,
+    required this.blockedCount,
+    required this.blockedByDomain,
   });
 
   static const Color _iconGray = Color(0xFF5F5F5F);
@@ -1044,7 +1032,8 @@ class _SettingsDrawer extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Container(
-              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              margin: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 4),
               decoration: BoxDecoration(
                 color: vpn.isActive
                     ? Colors.green.withOpacity(0.08)
@@ -1094,7 +1083,8 @@ class _SettingsDrawer extends StatelessWidget {
                       fontWeight: FontWeight.w600)),
               subtitle: const Text(
                   'Cookies, cache, histórico e armazenamento',
-                  style: TextStyle(color: Color(0xFF8A8A8A), fontSize: 12)),
+                  style: TextStyle(
+                      color: Color(0xFF8A8A8A), fontSize: 12)),
               trailing: const Icon(Icons.chevron_right,
                   color: Color(0xFFCCCCCC), size: 18),
               onTap: onBurnTap,
@@ -1105,8 +1095,50 @@ class _SettingsDrawer extends StatelessWidget {
                 () => Navigator.pop(context)),
             _item(Icons.search, 'Instância SearxNG', _iconGray,
                 () => Navigator.pop(context)),
-            _item(Icons.security, 'Privacidade & Trackers', _iconGray,
-                () => Navigator.pop(context)),
+
+            // ── Privacidade & Trackers — abre PrivacyScreen ──
+            ListTile(
+              leading: const Icon(Icons.security,
+                  color: _iconGray, size: 20),
+              title: const Text('Privacidade & Trackers',
+                  style: TextStyle(color: _iconGray, fontSize: 15)),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (blockedCount > 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF00D4FF).withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text('$blockedCount',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF0097A7),
+                          )),
+                    ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.chevron_right,
+                      color: Color(0xFFCCCCCC), size: 18),
+                ],
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PrivacyScreen(
+                      totalBlocked: blockedCount,
+                      blockedByDomain: blockedByDomain,
+                    ),
+                  ),
+                );
+              },
+            ),
+
             _item(Icons.info_outline, 'Sobre', _iconGray,
                 () => Navigator.pop(context)),
             const Spacer(),
@@ -1122,7 +1154,8 @@ class _SettingsDrawer extends StatelessWidget {
     );
   }
 
-  Widget _item(IconData icon, String label, Color color, VoidCallback onTap) {
+  Widget _item(
+      IconData icon, String label, Color color, VoidCallback onTap) {
     return ListTile(
       leading: Icon(icon, color: color, size: 20),
       title: Text(label, style: TextStyle(color: color, fontSize: 15)),
